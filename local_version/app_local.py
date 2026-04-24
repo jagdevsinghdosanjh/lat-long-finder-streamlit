@@ -5,7 +5,8 @@ from datetime import datetime
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
-from streamlit_geolocation import geolocation
+
+from common.geolocation import get_geolocation
 
 # ---------------- CONFIG ----------------
 
@@ -15,11 +16,9 @@ st.set_page_config(
     layout="wide",
 )
 
-# Log file in current directory
 LOG_FILE = os.path.join(os.path.dirname(__file__), "access_log_local.csv")
 
-# Simple local password (change this for your lab/server)
-TEACHER_PASSWORD = "teacher123"  # or use os.environ.get("TEACHER_PASSWORD")
+TEACHER_PASSWORD = "teacher123"  # Change for your lab/server
 
 
 # ---------------- UTILITIES ----------------
@@ -60,20 +59,12 @@ def save_log(entry: dict):
     df.to_csv(LOG_FILE, index=False)
 
 
-def get_role() -> str:
-    return st.session_state.get("role", "Student")
-
-
-def set_role(role: str):
-    st.session_state.role = role
-
-
-def teacher_authenticated() -> bool:
+def teacher_authenticated():
     return st.session_state.get("teacher_authed", False)
 
 
 def teacher_login_ui():
-    st.subheader("Teacher login (Local)")
+    st.subheader("Teacher Login (Local)")
     pwd = st.text_input("Enter teacher password", type="password")
     if st.button("Login"):
         if pwd == TEACHER_PASSWORD:
@@ -83,7 +74,7 @@ def teacher_login_ui():
             st.error("Incorrect password.")
 
 
-# ---------------- APP LAYOUT ----------------
+# ---------------- APP ----------------
 
 init_session()
 
@@ -92,86 +83,62 @@ st.caption("Local Streamlit app for geolocation, logging, and analytics.")
 
 with st.sidebar:
     st.header("Mode")
-    mode = st.radio("Select mode", ["Student", "Teacher"], index=0)
-    set_role(mode)
+    mode = st.radio("Select mode", ["Student", "Teacher"])
+    st.session_state.role = mode
 
-    st.markdown("---")
-    st.subheader("About")
-    st.markdown(
-        """
-        - **Student mode**: capture location + class info  
-        - **Teacher mode**: view logs, maps, and analytics  
-        - Data is stored in `access_log_local.csv` in this folder.  
-        """
-    )
-    st.markdown("**Privacy note**")
-    st.markdown(
-        """
-        - Location is used only for demonstration / teaching.  
-        - No third‑party tracking is added.  
-        """
-    )
-
-role = get_role()
+role = st.session_state.role
 
 # ---------------- STUDENT MODE ----------------
 
 if role == "Student":
-    st.markdown("## 🧑‍🎓 Student mode")
+    st.markdown("## 🧑‍🎓 Student Mode")
 
     st.markdown("### 1️⃣ Enter your class details")
 
     col1, col2, col3 = st.columns(3)
-    with col1:
-        school = st.text_input("School name", placeholder="e.g. XYZ Public School")
-    with col2:
-        class_name = st.text_input("Class", placeholder="e.g. 10")
-    with col3:
-        section = st.text_input("Section", placeholder="e.g. A")
+    school = col1.text_input("School")
+    class_name = col2.text_input("Class")
+    section = col3.text_input("Section")
 
     col4, col5 = st.columns(2)
-    with col4:
-        student_id = st.text_input("Roll no. / Student ID", placeholder="e.g. 23")
-    with col5:
-        ip_label = st.text_input("Network / IP label (optional)", placeholder="e.g. Lab‑PC‑01")
+    student_id = col4.text_input("Roll No / Student ID")
+    ip_label = col5.text_input("Network / IP Label (optional)")
 
     st.markdown("### 2️⃣ Capture your location")
-    st.write("Click below and allow location access in your browser when prompted.")
+    st.write("Allow location access when prompted.")
 
-    location = geolocation(key="student_geolocation_local")
+    location = get_geolocation()
 
     if location:
-        st.success("Location data received from browser.")
+        st.success("Location received.")
     else:
         st.info("Waiting for location permission…")
 
-    platform = st.text_input("Device / Platform (optional)", placeholder="e.g. Android / Windows / iOS")
-    user_agent = st.text_input("Browser / Device info (optional)", placeholder="e.g. Chrome on Windows")
+    platform = st.text_input("Platform (optional)")
+    user_agent = st.text_input("Browser / Device Info (optional)")
 
     if location:
         lat = location.get("latitude")
         lon = location.get("longitude")
-        accuracy = location.get("accuracy", None)
-        permission = "granted"
+        accuracy = location.get("accuracy")
+        permission = location.get("permission")
     else:
         lat = lon = accuracy = None
         permission = "pending"
 
     st.markdown("### 3️⃣ Review your data")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.metric("Latitude", f"{lat:.6f}" if lat else "—")
-        st.metric("Longitude", f"{lon:.6f}" if lon else "—")
-    with col_b:
-        st.metric("Accuracy (m)", f"{accuracy:.1f}" if accuracy else "—")
-        st.metric("Permission", permission)
+    colA, colB = st.columns(2)
+    colA.metric("Latitude", f"{lat:.6f}" if lat else "—")
+    colA.metric("Longitude", f"{lon:.6f}" if lon else "—")
+    colB.metric("Accuracy (m)", f"{accuracy:.1f}" if accuracy else "—")
+    colB.metric("Permission", permission)
 
     st.markdown("### 4️⃣ Submit to teacher log")
 
     can_log = all([school, class_name, section, student_id, lat, lon])
 
-    if st.button("Submit my location", type="primary", disabled=not can_log):
+    if st.button("Submit", disabled=not can_log):
         entry = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "session_id": st.session_state.session_id,
@@ -189,168 +156,75 @@ if role == "Student":
             "permission": permission,
         }
         save_log(entry)
-        st.success("Your location has been submitted to the teacher log ✅")
+        st.success("Submitted successfully.")
 
-    st.markdown("### 5️⃣ Your location on the map")
+    st.markdown("### 5️⃣ Map Preview")
     if lat and lon:
-        map_df = pd.DataFrame({"lat": [lat], "lon": [lon]})
+        df = pd.DataFrame({"lat": [lat], "lon": [lon]})
         st.pydeck_chart(
             pdk.Deck(
-                map_style="mapbox://styles/mapbox/light-v9",
-                initial_view_state=pdk.ViewState(
-                    latitude=lat,
-                    longitude=lon,
-                    zoom=14,
-                    pitch=45,
-                ),
+                initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=14),
                 layers=[
                     pdk.Layer(
                         "ScatterplotLayer",
-                        data=map_df,
+                        data=df,
                         get_position="[lon, lat]",
                         get_color="[0, 128, 255, 200]",
-                        get_radius=30,
+                        get_radius=40,
                     )
                 ],
             )
         )
-    else:
-        st.info("Map will appear here after your location is captured.")
 
 # ---------------- TEACHER MODE ----------------
 
 else:
-    st.markdown("## 🧑‍🏫 Teacher mode (Local)")
+    st.markdown("## 🧑‍🏫 Teacher Mode (Local)")
 
     if not teacher_authenticated():
         teacher_login_ui()
-    else:
-        logs = load_logs()
+        st.stop()
 
-        if logs.empty:
-            st.info("No logs yet. Ask students to submit their locations in Student mode.")
-        else:
-            st.markdown("### 1️⃣ Filters")
+    logs = load_logs()
 
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                school_filter = st.selectbox(
-                    "School",
-                    options=["All"] + sorted(logs["school"].dropna().unique().tolist()),
-                    index=0,
-                )
-            with col2:
-                class_filter = st.selectbox(
-                    "Class",
-                    options=["All"] + sorted(logs["class_name"].dropna().unique().tolist()),
-                    index=0,
-                )
-            with col3:
-                section_filter = st.selectbox(
-                    "Section",
-                    options=["All"] + sorted(logs["section"].dropna().unique().tolist()),
-                    index=0,
-                )
-            with col4:
-                role_filter = st.selectbox(
-                    "Role",
-                    options=["All"] + sorted(logs["role"].dropna().unique().tolist()),
-                    index=0,
-                )
+    if logs.empty:
+        st.info("No logs yet.")
+        st.stop()
 
-            filtered = logs.copy()
-            if school_filter != "All":
-                filtered = filtered[filtered["school"] == school_filter]
-            if class_filter != "All":
-                filtered = filtered[filtered["class_name"] == class_filter]
-            if section_filter != "All":
-                filtered = filtered[filtered["section"] == section_filter]
-            if role_filter != "All":
-                filtered = filtered[filtered["role"] == role_filter]
+    st.markdown("### Filters")
 
-            st.markdown("### 2️⃣ Summary")
+    col1, col2, col3 = st.columns(3)
+    school_f = col1.selectbox("School", ["All"] + logs.school.dropna().unique().tolist())
+    class_f = col2.selectbox("Class", ["All"] + logs.class_name.dropna().unique().tolist())
+    section_f = col3.selectbox("Section", ["All"] + logs.section.dropna().unique().tolist())
 
-            col_a, col_b, col_c, col_d = st.columns(4)
-            col_a.metric("Total entries", len(filtered))
-            col_b.metric("Unique students", filtered["student_id"].nunique())
-            col_c.metric("Classes", filtered["class_name"].nunique())
-            col_d.metric("Schools", filtered["school"].nunique())
+    filtered = logs.copy()
+    if school_f != "All":
+        filtered = filtered[filtered.school == school_f]
+    if class_f != "All":
+        filtered = filtered[filtered.class_name == class_f]
+    if section_f != "All":
+        filtered = filtered[filtered.section == section_f]
 
-            st.markdown("### 3️⃣ Map of all logged points")
+    st.markdown("### Summary")
 
-            if not filtered["latitude"].isna().all():
-                map_df = (
-                    filtered[["latitude", "longitude", "school", "class_name", "section", "student_id"]]
-                    .dropna()
-                    .rename(columns={"latitude": "lat", "longitude": "lon"})
-                )
+    colA, colB, colC = st.columns(3)
+    colA.metric("Total Entries", len(filtered))
+    colB.metric("Unique Students", filtered.student_id.nunique())
+    colC.metric("Classes", filtered.class_name.nunique())
 
-                tooltip_text = (
-                    map_df["school"].fillna("Unknown")
-                    + " | Class "
-                    + map_df["class_name"].fillna("?")
-                    + "-"
-                    + map_df["section"].fillna("?")
-                    + " | Roll "
-                    + map_df["student_id"].fillna("?")
-                )
-                map_df["tooltip"] = tooltip_text
+    st.markdown("### Map of All Points")
 
-                st.pydeck_chart(
-                    pdk.Deck(
-                        map_style="mapbox://styles/mapbox/light-v9",
-                        initial_view_state=pdk.ViewState(
-                            latitude=map_df["lat"].mean(),
-                            longitude=map_df["lon"].mean(),
-                            zoom=11,
-                            pitch=45,
-                        ),
-                        layers=[
-                            pdk.Layer(
-                                "ScatterplotLayer",
-                                data=map_df,
-                                get_position="[lon, lat]",
-                                get_color="[255, 0, 0, 180]",
-                                get_radius=40,
-                                pickable=True,
-                            )
-                        ],
-                        tooltip={"text": "{tooltip}"},
-                    )
-                )
-            else:
-                st.info("No valid coordinates in filtered logs.")
+    if not filtered.latitude.isna().all():
+        df = filtered.rename(columns={"latitude": "lat", "longitude": "lon"})
+        st.map(df[["lat", "lon"]])
 
-            st.markdown("### 4️⃣ Class / section distribution")
+    st.markdown("### Logs Table")
+    st.dataframe(filtered.sort_values("timestamp", ascending=False))
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Entries per class**")
-                class_counts = (
-                    filtered["class_name"].fillna("Unknown").value_counts().sort_index()
-                )
-                st.bar_chart(class_counts)
-            with col2:
-                st.markdown("**Entries per section**")
-                section_counts = (
-                    filtered["section"].fillna("Unknown").value_counts().sort_index()
-                )
-                st.bar_chart(section_counts)
-
-            st.markdown("### 5️⃣ Raw logs")
-
-            with st.expander("Show logs table"):
-                st.dataframe(
-                    filtered.sort_values("timestamp", ascending=False),
-                    use_container_width=True,
-                )
-
-            st.markdown("### 6️⃣ Download logs")
-
-            csv_bytes = filtered.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Download filtered logs as CSV",
-                data=csv_bytes,
-                file_name="lat_long_logs_local_filtered.csv",
-                mime="text/csv",
-            )
+    st.download_button(
+        "Download CSV",
+        filtered.to_csv(index=False).encode("utf-8"),
+        "local_logs_filtered.csv",
+        "text/csv",
+    )

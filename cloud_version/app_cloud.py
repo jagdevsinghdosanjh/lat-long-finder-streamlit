@@ -1,11 +1,11 @@
-import os
 import time
 from datetime import datetime
 
 import pandas as pd
 import pydeck as pdk
 import streamlit as st
-from streamlit_geolocation import geolocation
+
+from common.geolocation import get_geolocation
 
 # ---------------- CONFIG ----------------
 
@@ -15,7 +15,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# On Streamlit Cloud, filesystem is ephemeral but writable during a session
 LOG_FILE = "access_log_cloud.csv"
 
 TEACHER_PASSWORD = st.secrets.get("TEACHER_PASSWORD", None)
@@ -28,11 +27,11 @@ def init_session():
         st.session_state.session_id = f"session-{int(time.time() * 1000)}"
 
 
-def load_logs() -> pd.DataFrame:
+def load_logs():
     try:
-        df = pd.read_csv(LOG_FILE)
-    except FileNotFoundError:
-        df = pd.DataFrame(
+        return pd.read_csv(LOG_FILE)
+    except:
+        return pd.DataFrame(
             columns=[
                 "timestamp",
                 "session_id",
@@ -50,34 +49,24 @@ def load_logs() -> pd.DataFrame:
                 "permission",
             ]
         )
-    return df
 
 
-def save_log(entry: dict):
+def save_log(entry):
     df = load_logs()
     df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
     df.to_csv(LOG_FILE, index=False)
 
 
-def get_role() -> str:
-    return st.session_state.get("role", "Student")
-
-
-def set_role(role: str):
-    st.session_state.role = role
-
-
-def teacher_authenticated() -> bool:
+def teacher_authenticated():
     if TEACHER_PASSWORD is None:
-        # If no secret set, treat as open (for quick demos)
         return True
     return st.session_state.get("teacher_authed", False)
 
 
 def teacher_login_ui():
-    st.subheader("Teacher login (Cloud)")
+    st.subheader("Teacher Login (Cloud)")
     if TEACHER_PASSWORD is None:
-        st.info("No TEACHER_PASSWORD secret configured. Teacher mode is open for this deployment.")
+        st.info("No password set in secrets. Teacher mode is open.")
         st.session_state.teacher_authed = True
         return
 
@@ -85,12 +74,12 @@ def teacher_login_ui():
     if st.button("Login"):
         if pwd == TEACHER_PASSWORD:
             st.session_state.teacher_authed = True
-            st.success("Teacher authenticated.")
+            st.success("Authenticated.")
         else:
             st.error("Incorrect password.")
 
 
-# ---------------- APP LAYOUT ----------------
+# ---------------- APP ----------------
 
 init_session()
 
@@ -99,86 +88,56 @@ st.caption("Streamlit Cloud app for geolocation, logging, and analytics.")
 
 with st.sidebar:
     st.header("Mode")
-    mode = st.radio("Select mode", ["Student", "Teacher"], index=0)
-    set_role(mode)
+    mode = st.radio("Select mode", ["Student", "Teacher"])
+    st.session_state.role = mode
 
-    st.markdown("---")
-    st.subheader("About")
-    st.markdown(
-        """
-        - **Student mode**: capture location + class info  
-        - **Teacher mode**: view logs, maps, and analytics  
-        - Data is stored in `access_log_cloud.csv` (resets on redeploy).  
-        """
-    )
-    st.markdown("**Privacy note**")
-    st.markdown(
-        """
-        - Location is used only for demonstration / teaching.  
-        - No third‑party tracking is added.  
-        """
-    )
-
-role = get_role()
+role = st.session_state.role
 
 # ---------------- STUDENT MODE ----------------
 
 if role == "Student":
-    st.markdown("## 🧑‍🎓 Student mode")
-
-    st.markdown("### 1️⃣ Enter your class details")
+    st.markdown("## 🧑‍🎓 Student Mode")
 
     col1, col2, col3 = st.columns(3)
-    with col1:
-        school = st.text_input("School name", placeholder="e.g. XYZ Public School")
-    with col2:
-        class_name = st.text_input("Class", placeholder="e.g. 10")
-    with col3:
-        section = st.text_input("Section", placeholder="e.g. A")
+    school = col1.text_input("School")
+    class_name = col2.text_input("Class")
+    section = col3.text_input("Section")
 
     col4, col5 = st.columns(2)
-    with col4:
-        student_id = st.text_input("Roll no. / Student ID", placeholder="e.g. 23")
-    with col5:
-        ip_label = st.text_input("Network / IP label (optional)", placeholder="e.g. Lab‑PC‑01")
+    student_id = col4.text_input("Roll No / Student ID")
+    ip_label = col5.text_input("Network / IP Label (optional)")
 
-    st.markdown("### 2️⃣ Capture your location")
-    st.write("Click below and allow location access in your browser when prompted.")
-
-    location = geolocation(key="student_geolocation_cloud")
+    st.markdown("### Capture Location")
+    location = get_geolocation()
 
     if location:
-        st.success("Location data received from browser.")
+        st.success("Location received.")
     else:
         st.info("Waiting for location permission…")
 
-    platform = st.text_input("Device / Platform (optional)", placeholder="e.g. Android / Windows / iOS")
-    user_agent = st.text_input("Browser / Device info (optional)", placeholder="e.g. Chrome on Windows")
+    platform = st.text_input("Platform (optional)")
+    user_agent = st.text_input("Browser / Device Info (optional)")
 
     if location:
         lat = location.get("latitude")
         lon = location.get("longitude")
-        accuracy = location.get("accuracy", None)
-        permission = "granted"
+        accuracy = location.get("accuracy")
+        permission = location.get("permission")
     else:
         lat = lon = accuracy = None
         permission = "pending"
 
-    st.markdown("### 3️⃣ Review your data")
+    st.markdown("### Review Data")
 
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.metric("Latitude", f"{lat:.6f}" if lat else "—")
-        st.metric("Longitude", f"{lon:.6f}" if lon else "—")
-    with col_b:
-        st.metric("Accuracy (m)", f"{accuracy:.1f}" if accuracy else "—")
-        st.metric("Permission", permission)
-
-    st.markdown("### 4️⃣ Submit to teacher log")
+    colA, colB = st.columns(2)
+    colA.metric("Latitude", f"{lat:.6f}" if lat else "—")
+    colA.metric("Longitude", f"{lon:.6f}" if lon else "—")
+    colB.metric("Accuracy", f"{accuracy:.1f}" if accuracy else "—")
+    colB.metric("Permission", permission)
 
     can_log = all([school, class_name, section, student_id, lat, lon])
 
-    if st.button("Submit my location", type="primary", disabled=not can_log):
+    if st.button("Submit", disabled=not can_log):
         entry = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "session_id": st.session_state.session_id,
@@ -196,168 +155,72 @@ if role == "Student":
             "permission": permission,
         }
         save_log(entry)
-        st.success("Your location has been submitted to the teacher log ✅")
+        st.success("Submitted successfully.")
 
-    st.markdown("### 5️⃣ Your location on the map")
     if lat and lon:
-        map_df = pd.DataFrame({"lat": [lat], "lon": [lon]})
+        df = pd.DataFrame({"lat": [lat], "lon": [lon]})
         st.pydeck_chart(
             pdk.Deck(
-                map_style="mapbox://styles/mapbox/light-v9",
-                initial_view_state=pdk.ViewState(
-                    latitude=lat,
-                    longitude=lon,
-                    zoom=14,
-                    pitch=45,
-                ),
+                initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=14),
                 layers=[
                     pdk.Layer(
                         "ScatterplotLayer",
-                        data=map_df,
+                        data=df,
                         get_position="[lon, lat]",
                         get_color="[0, 128, 255, 200]",
-                        get_radius=30,
+                        get_radius=40,
                     )
                 ],
             )
         )
-    else:
-        st.info("Map will appear here after your location is captured.")
 
 # ---------------- TEACHER MODE ----------------
 
 else:
-    st.markdown("## 🧑‍🏫 Teacher mode (Cloud)")
+    st.markdown("## 🧑‍🏫 Teacher Mode (Cloud)")
 
     if not teacher_authenticated():
         teacher_login_ui()
-    else:
-        logs = load_logs()
+        st.stop()
 
-        if logs.empty:
-            st.info("No logs yet. Ask students to submit their locations in Student mode.")
-        else:
-            st.markdown("### 1️⃣ Filters")
+    logs = load_logs()
 
-            col1, col2, col3, col4 = st.columns(4)
-            with col1:
-                school_filter = st.selectbox(
-                    "School",
-                    options=["All"] + sorted(logs["school"].dropna().unique().tolist()),
-                    index=0,
-                )
-            with col2:
-                class_filter = st.selectbox(
-                    "Class",
-                    options=["All"] + sorted(logs["class_name"].dropna().unique().tolist()),
-                    index=0,
-                )
-            with col3:
-                section_filter = st.selectbox(
-                    "Section",
-                    options=["All"] + sorted(logs["section"].dropna().unique().tolist()),
-                    index=0,
-                )
-            with col4:
-                role_filter = st.selectbox(
-                    "Role",
-                    options=["All"] + sorted(logs["role"].dropna().unique().tolist()),
-                    index=0,
-                )
+    if logs.empty:
+        st.info("No logs yet.")
+        st.stop()
 
-            filtered = logs.copy()
-            if school_filter != "All":
-                filtered = filtered[filtered["school"] == school_filter]
-            if class_filter != "All":
-                filtered = filtered[filtered["class_name"] == class_filter]
-            if section_filter != "All":
-                filtered = filtered[filtered["section"] == section_filter]
-            if role_filter != "All":
-                filtered = filtered[filtered["role"] == role_filter]
+    col1, col2, col3 = st.columns(3)
+    school_f = col1.selectbox("School", ["All"] + logs.school.dropna().unique().tolist())
+    class_f = col2.selectbox("Class", ["All"] + logs.class_name.dropna().unique().tolist())
+    section_f = col3.selectbox("Section", ["All"] + logs.section.dropna().unique().tolist())
 
-            st.markdown("### 2️⃣ Summary")
+    filtered = logs.copy()
+    if school_f != "All":
+        filtered = filtered[filtered.school == school_f]
+    if class_f != "All":
+        filtered = filtered[filtered.class_name == class_f]
+    if section_f != "All":
+        filtered = filtered[filtered.section == section_f]
 
-            col_a, col_b, col_c, col_d = st.columns(4)
-            col_a.metric("Total entries", len(filtered))
-            col_b.metric("Unique students", filtered["student_id"].nunique())
-            col_c.metric("Classes", filtered["class_name"].nunique())
-            col_d.metric("Schools", filtered["school"].nunique())
+    st.markdown("### Summary")
 
-            st.markdown("### 3️⃣ Map of all logged points")
+    colA, colB, colC = st.columns(3)
+    colA.metric("Total Entries", len(filtered))
+    colB.metric("Unique Students", filtered.student_id.nunique())
+    colC.metric("Classes", filtered.class_name.nunique())
 
-            if not filtered["latitude"].isna().all():
-                map_df = (
-                    filtered[["latitude", "longitude", "school", "class_name", "section", "student_id"]]
-                    .dropna()
-                    .rename(columns={"latitude": "lat", "longitude": "lon"})
-                )
+    st.markdown("### Map")
 
-                tooltip_text = (
-                    map_df["school"].fillna("Unknown")
-                    + " | Class "
-                    + map_df["class_name"].fillna("?")
-                    + "-"
-                    + map_df["section"].fillna("?")
-                    + " | Roll "
-                    + map_df["student_id"].fillna("?")
-                )
-                map_df["tooltip"] = tooltip_text
+    if not filtered.latitude.isna().all():
+        df = filtered.rename(columns={"latitude": "lat", "longitude": "lon"})
+        st.map(df[["lat", "lon"]])
 
-                st.pydeck_chart(
-                    pdk.Deck(
-                        map_style="mapbox://styles/mapbox/light-v9",
-                        initial_view_state=pdk.ViewState(
-                            latitude=map_df["lat"].mean(),
-                            longitude=map_df["lon"].mean(),
-                            zoom=11,
-                            pitch=45,
-                        ),
-                        layers=[
-                            pdk.Layer(
-                                "ScatterplotLayer",
-                                data=map_df,
-                                get_position="[lon, lat]",
-                                get_color="[255, 0, 0, 180]",
-                                get_radius=40,
-                                pickable=True,
-                            )
-                        ],
-                        tooltip={"text": "{tooltip}"},
-                    )
-                )
-            else:
-                st.info("No valid coordinates in filtered logs.")
+    st.markdown("### Logs Table")
+    st.dataframe(filtered.sort_values("timestamp", ascending=False))
 
-            st.markdown("### 4️⃣ Class / section distribution")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Entries per class**")
-                class_counts = (
-                    filtered["class_name"].fillna("Unknown").value_counts().sort_index()
-                )
-                st.bar_chart(class_counts)
-            with col2:
-                st.markdown("**Entries per section**")
-                section_counts = (
-                    filtered["section"].fillna("Unknown").value_counts().sort_index()
-                )
-                st.bar_chart(section_counts)
-
-            st.markdown("### 5️⃣ Raw logs")
-
-            with st.expander("Show logs table"):
-                st.dataframe(
-                    filtered.sort_values("timestamp", ascending=False),
-                    use_container_width=True,
-                )
-
-            st.markdown("### 6️⃣ Download logs")
-
-            csv_bytes = filtered.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                label="Download filtered logs as CSV",
-                data=csv_bytes,
-                file_name="lat_long_logs_cloud_filtered.csv",
-                mime="text/csv",
-            )
+    st.download_button(
+        "Download CSV",
+        filtered.to_csv(index=False).encode("utf-8"),
+        "cloud_logs_filtered.csv",
+        "text/csv",
+    )
