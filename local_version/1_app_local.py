@@ -1,11 +1,10 @@
 import sys
 import os
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import os
 import time
 from datetime import datetime
-import json
 
 import pandas as pd
 import pydeck as pdk
@@ -13,31 +12,31 @@ import streamlit as st
 
 from common.geolocation import get_geolocation
 
-
 # ---------------- CONFIG ----------------
 
 st.set_page_config(
-    page_title="Lat‑Long Finder (Cloud)",
+    page_title="Lat‑Long Finder (Local)",
     page_icon="📍",
     layout="wide",
 )
 
-LOG_FILE = "access_log_cloud.csv"
-TEACHER_PASSWORD = st.secrets.get("TEACHER_PASSWORD", None)
+LOG_FILE = os.path.join(os.path.dirname(__file__), "access_log_local.csv")
+
+TEACHER_PASSWORD = "teacher123"  # Change for your lab/server
 
 
 # ---------------- UTILITIES ----------------
 
-def init_session() -> None:
+def init_session():
     if "session_id" not in st.session_state:
         st.session_state.session_id = f"session-{int(time.time() * 1000)}"
 
 
 def load_logs() -> pd.DataFrame:
     try:
-        return pd.read_csv(LOG_FILE)
-    except Exception:
-        return pd.DataFrame(
+        df = pd.read_csv(LOG_FILE)
+    except FileNotFoundError:
+        df = pd.DataFrame(
             columns=[
                 "timestamp",
                 "session_id",
@@ -55,32 +54,26 @@ def load_logs() -> pd.DataFrame:
                 "permission",
             ]
         )
+    return df
 
 
-def save_log(entry: dict) -> None:
+def save_log(entry: dict):
     df = load_logs()
     df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
     df.to_csv(LOG_FILE, index=False)
 
 
-def teacher_authenticated() -> bool:
-    if TEACHER_PASSWORD is None:
-        return True
-    return bool(st.session_state.get("teacher_authed", False))
+def teacher_authenticated():
+    return st.session_state.get("teacher_authed", False)
 
 
-def teacher_login_ui() -> None:
-    st.subheader("Teacher Login (Cloud)")
-    if TEACHER_PASSWORD is None:
-        st.info("No password set in secrets. Teacher mode is open.")
-        st.session_state.teacher_authed = True
-        return
-
+def teacher_login_ui():
+    st.subheader("Teacher Login (Local)")
     pwd = st.text_input("Enter teacher password", type="password")
     if st.button("Login"):
         if pwd == TEACHER_PASSWORD:
             st.session_state.teacher_authed = True
-            st.success("Authenticated.")
+            st.success("Teacher authenticated.")
         else:
             st.error("Incorrect password.")
 
@@ -89,8 +82,8 @@ def teacher_login_ui() -> None:
 
 init_session()
 
-st.title("📍 Lat‑Long Finder for Classrooms (Cloud)")
-st.caption("Streamlit Cloud app for geolocation, logging, and analytics.")
+st.title("📍 Lat‑Long Finder for Classrooms (Local)")
+st.caption("Local Streamlit app for geolocation, logging, and analytics.")
 
 with st.sidebar:
     st.header("Mode")
@@ -106,34 +99,14 @@ if role == "Student":
 
     st.markdown("### 1️⃣ Enter your class details")
 
-    school_list = [
-        "GHS Chananke Amritsar",
-        "GHS Sohian Kalan",
-        "GHS Sohian Khurd",
-        "Other",
-    ]
-
-    class_list = ["6", "7", "8", "9", "10", "11", "12"]
-    section_list = ["A", "B", "C", "D", "E", "F", "S"]
-
     col1, col2, col3 = st.columns(3)
-    with col1:
-        school = st.selectbox("School", school_list)
-        if school == "Other":
-            school = st.text_input("Enter school name")
-    with col2:
-        class_name = st.selectbox("Class", class_list)
-    with col3:
-        section = st.selectbox("Section", section_list)
+    school = col1.text_input("School")
+    class_name = col2.text_input("Class")
+    section = col3.text_input("Section")
 
     col4, col5 = st.columns(2)
-    with col4:
-        student_id = st.text_input("Roll No / Student ID", placeholder="e.g. 1")
-    with col5:
-        ip_label = st.text_input(
-            "Network / IP Label (optional)",
-            placeholder="e.g. Lab-PC-01",
-        )
+    student_id = col4.text_input("Roll No / Student ID")
+    ip_label = col5.text_input("Network / IP Label (optional)")
 
     st.markdown("### 2️⃣ Capture your location")
     st.write("Allow location access when prompted.")
@@ -145,11 +118,8 @@ if role == "Student":
     else:
         st.info("Waiting for location permission…")
 
-    platform = st.text_input("Platform (optional)", placeholder="e.g. Windows / Android")
-    user_agent = st.text_input(
-        "Browser / Device Info (optional)",
-        placeholder="e.g. MS Edge",
-    )
+    platform = st.text_input("Platform (optional)")
+    user_agent = st.text_input("Browser / Device Info (optional)")
 
     if location:
         lat = location.get("latitude")
@@ -157,37 +127,20 @@ if role == "Student":
         accuracy = location.get("accuracy")
         permission = location.get("permission")
     else:
-        lat = None
-        lon = None
-        accuracy = None
+        lat = lon = accuracy = None
         permission = "pending"
 
     st.markdown("### 3️⃣ Review your data")
 
     colA, colB = st.columns(2)
-    colA.metric("Latitude", f"{lat:.6f}" if lat is not None else "—")
-    colA.metric("Longitude", f"{lon:.6f}" if lon is not None else "—")
-    colB.metric("Accuracy (m)", f"{accuracy:.1f}" if accuracy is not None else "—")
+    colA.metric("Latitude", f"{lat:.6f}" if lat else "—")
+    colA.metric("Longitude", f"{lon:.6f}" if lon else "—")
+    colB.metric("Accuracy (m)", f"{accuracy:.1f}" if accuracy else "—")
     colB.metric("Permission", permission)
 
-    missing = []
-    if not school:
-        missing.append("School")
-    if not class_name:
-        missing.append("Class")
-    if not section:
-        missing.append("Section")
-    if not student_id:
-        missing.append("Roll No")
-    if lat is None or lon is None:
-        missing.append("Location")
-
-    if missing:
-        st.warning("Please fill: " + ", ".join(missing))
-
-    can_log = len(missing) == 0
-
     st.markdown("### 4️⃣ Submit to teacher log")
+
+    can_log = all([school, class_name, section, student_id, lat, lon])
 
     if st.button("Submit", disabled=not can_log):
         entry = {
@@ -210,15 +163,11 @@ if role == "Student":
         st.success("Submitted successfully.")
 
     st.markdown("### 5️⃣ Map Preview")
-    if lat is not None and lon is not None:
+    if lat and lon:
         df = pd.DataFrame({"lat": [lat], "lon": [lon]})
         st.pydeck_chart(
             pdk.Deck(
-                initial_view_state=pdk.ViewState(
-                    latitude=lat,
-                    longitude=lon,
-                    zoom=14,
-                ),
+                initial_view_state=pdk.ViewState(latitude=lat, longitude=lon, zoom=14),
                 layers=[
                     pdk.Layer(
                         "ScatterplotLayer",
@@ -234,7 +183,7 @@ if role == "Student":
 # ---------------- TEACHER MODE ----------------
 
 else:
-    st.markdown("## 🧑‍🏫 Teacher Mode (Cloud)")
+    st.markdown("## 🧑‍🏫 Teacher Mode (Local)")
 
     if not teacher_authenticated():
         teacher_login_ui()
@@ -249,18 +198,9 @@ else:
     st.markdown("### Filters")
 
     col1, col2, col3 = st.columns(3)
-    school_f = col1.selectbox(
-        "School",
-        ["All"] + logs.school.dropna().unique().tolist(),
-    )
-    class_f = col2.selectbox(
-        "Class",
-        ["All"] + logs.class_name.dropna().unique().tolist(),
-    )
-    section_f = col3.selectbox(
-        "Section",
-        ["All"] + logs.section.dropna().unique().tolist(),
-    )
+    school_f = col1.selectbox("School", ["All"] + logs.school.dropna().unique().tolist())
+    class_f = col2.selectbox("Class", ["All"] + logs.class_name.dropna().unique().tolist())
+    section_f = col3.selectbox("Section", ["All"] + logs.section.dropna().unique().tolist())
 
     filtered = logs.copy()
     if school_f != "All":
@@ -277,7 +217,7 @@ else:
     colB.metric("Unique Students", filtered.student_id.nunique())
     colC.metric("Classes", filtered.class_name.nunique())
 
-    st.markdown("### Map")
+    st.markdown("### Map of All Points")
 
     if not filtered.latitude.isna().all():
         df = filtered.rename(columns={"latitude": "lat", "longitude": "lon"})
@@ -289,6 +229,6 @@ else:
     st.download_button(
         "Download CSV",
         filtered.to_csv(index=False).encode("utf-8"),
-        "cloud_logs_filtered.csv",
+        "local_logs_filtered.csv",
         "text/csv",
     )

@@ -1,21 +1,31 @@
-import json
+import base64
 import streamlit as st
-import streamlit.components.v1 as components
+import json
 
 def get_geolocation():
     """
-    Returns geolocation data from browser using JS.
-    Output example:
-    {
-        "latitude": float,
-        "longitude": float,
-        "accuracy": float,
-        "permission": "granted" | "denied"
-    }
+    Modern geolocation using a hidden HTML input field.
+    Works in Streamlit Cloud + Local + all browsers.
     """
-    geo_html = """
+
+    # Hidden input field for receiving JSON
+    geo_input = st.text_input("geo_data_input", value="", key="geo_data_input", label_visibility="collapsed")
+
+    # If JS wrote data into the hidden input, parse it
+    if geo_input:
+        try:
+            return json.loads(geo_input)
+        except:
+            return None
+
+    # HTML + JS that writes geolocation JSON into the hidden input
+    html = """
+    <html>
+    <body>
+    <input type="text" id="geo_data_input" style="display:none;" />
+
     <script>
-    const sendLocation = () => {
+    function sendLocation() {
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 const data = {
@@ -24,28 +34,26 @@ def get_geolocation():
                     accuracy: pos.coords.accuracy,
                     permission: "granted"
                 };
-                window.parent.postMessage({type: "geo_success", data: data}, "*");
+                document.getElementById("geo_data_input").value = JSON.stringify(data);
+                document.getElementById("geo_data_input").dispatchEvent(new Event("input"));
             },
             (err) => {
-                window.parent.postMessage({type: "geo_error", data: {permission: "denied"}}, "*");
+                const data = {permission: "denied"};
+                document.getElementById("geo_data_input").value = JSON.stringify(data);
+                document.getElementById("geo_data_input").dispatchEvent(new Event("input"));
             }
         );
-    };
+    }
     sendLocation();
     </script>
+    </body>
+    </html>
     """
 
-    components.html(geo_html, height=0)
+    encoded = base64.b64encode(html.encode("utf-8")).decode("utf-8")
+    src = f"data:text/html;base64,{encoded}"
 
-    if "geo_data" not in st.session_state:
-        st.session_state.geo_data = None
+    # Invisible iframe (height must be >= 1)
+    st.iframe(src, height=1)
 
-    message = st.experimental_get_query_params().get("geo_message", None)
-
-    if message:
-        try:
-            st.session_state.geo_data = json.loads(message[0])
-        except:
-            pass
-
-    return st.session_state.geo_data
+    return None
